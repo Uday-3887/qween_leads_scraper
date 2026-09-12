@@ -6,7 +6,7 @@ export interface ScrapingJob {
   target: number;
   enrichment: 'none' | 'website' | 'full';
   format: 'csv' | 'xlsx' | 'json';
-  status: 'pending' | 'running' | 'completed' | 'failed' | 'stopped' | 'partial';
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'stopped' | 'partial' | 'interrupted';
   created_at: string;
   started_at?: string;
   completed_at?: string;
@@ -70,6 +70,7 @@ export interface HealthStatus {
   playwright_importable: boolean;
   output_directory_writable: boolean;
   demo_mode?: boolean;
+  connection_error?: string;
 }
 
 export interface DashboardStats {
@@ -80,4 +81,15 @@ export interface DashboardStats {
   active_query?: string;
 }
 
-export type PageView = 'dashboard' | 'scrape' | 'leads' | 'settings' | 'logs';
+export type PageView = 'dashboard' | 'scrape' | 'leads' | 'settings' | 'logs' | 'setup';
+
+export interface ConnectionInfo {
+  connected: boolean;
+  backendUrl: string;
+  lastCheck: number;
+  error?: string;
+  version?: string;
+  python?: string;
+  playwright?: boolean;
+  chromium?: boolean;
+}

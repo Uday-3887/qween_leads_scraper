@@ -2,11 +2,204 @@ import { ScrapingJob, HealthStatus, LeadRecord, DashboardStats } from '../types'
 
 const BACKEND_URL = 'http://127.0.0.1:8766';
 
-let demoMode = false;
-let demoJobs: ScrapingJob[] = [];
-let demoLeads: LeadRecord[] = [];
+// ============ CONNECTION STATE ============
+let _demoMode = false;
+let _lastHealthCheck: number = 0;
+let _healthCheckInterval: ReturnType<typeof setInterval> | null = null;
+let _onConnectionChange: ((connected: boolean) => void) | null = null;
 
-// Demo data for when backend is not available
+export function isDemoMode(): boolean {
+  return _demoMode;
+}
+
+export function setDemoMode(value: boolean): void {
+  _demoMode = value;
+}
+
+export function getBackendUrl(): string {
+  return BACKEND_URL;
+}
+
+export function onConnectionChange(cb: (connected: boolean) => void) {
+  _onConnectionChange = cb;
+}
+
+// ============ HEALTH CHECK ============
+export async function checkHealth(): Promise<HealthStatus> {
+  _lastHealthCheck = Date.now();
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 3000);
+
+    const response = await fetch(`${BACKEND_URL}/api/health`, {
+      method: 'GET',
+      signal: controller.signal,
+      headers: { 'Accept': 'application/json' },
+    });
+    clearTimeout(timeoutId);
+
+    if (response.ok) {
+      const data = await response.json();
+      const wasDemo = _demoMode;
+      _demoMode = false;
+      if (wasDemo && _onConnectionChange) _onConnectionChange(true);
+      return { ...data, demo_mode: false };
+    }
+    throw new Error(`HTTP ${response.status}`);
+  } catch (err: any) {
+    const wasLive = !_demoMode;
+    _demoMode = true;
+    if (wasLive && _onConnectionChange) _onConnectionChange(false);
+
+    const message = err.name === 'AbortError'
+      ? 'Connection timeout'
+      : err.message || 'Unknown error';
+
+    return {
+      ok: false,
+      status: 'offline',
+      version: 'N/A',
+      python: 'N/A',
+      scraper_ready: false,
+      playwright_importable: false,
+      output_directory_writable: false,
+      demo_mode: true,
+      connection_error: message,
+    } as HealthStatus & { connection_error: string };
+  }
+}
+
+export function startHealthPolling(intervalMs: number = 5000) {
+  if (_healthCheckInterval) return;
+  _healthCheckInterval = setInterval(async () => {
+    await checkHealth();
+  }, intervalMs);
+}
+
+export function stopHealthPolling() {
+  if (_healthCheckInterval) {
+    clearInterval(_healthCheckInterval);
+    _healthCheckInterval = null;
+  }
+}
+
+// ============ JOBS API ============
+export async function createJob(params: {
+  query: string;
+  target: number;
+  enrichment: 'none' | 'website' | 'full';
+  format: 'csv' | 'xlsx' | 'json';
+}): Promise<ScrapingJob> {
+  if (_demoMode) {
+    return createDemoJob(params);
+  }
+
+  const response = await fetch(`${BACKEND_URL}/api/jobs`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  });
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ error: 'Unknown error' }));
+    throw new Error(err.error || `HTTP ${response.status}`);
+  }
+
+  return response.json();
+}
+
+export async function getJobs(): Promise<ScrapingJob[]> {
+  if (_demoMode) {
+    return _demoJobs;
+  }
+
+  const response = await fetch(`${BACKEND_URL}/api/jobs`);
+  if (!response.ok) throw new Error(`Failed to fetch jobs: HTTP ${response.status}`);
+  return response.json();
+}
+
+export async function getJob(id: string): Promise<ScrapingJob> {
+  if (_demoMode) {
+    const job = _demoJobs.find(j => j.id === id);
+    if (!job) throw new Error('Job not found');
+    return job;
+  }
+
+  const response = await fetch(`${BACKEND_URL}/api/jobs/${id}`);
+  if (!response.ok) throw new Error(`Failed to fetch job: HTTP ${response.status}`);
+  return response.json();
+}
+
+export async function stopJob(id: string): Promise<void> {
+  if (_demoMode) {
+    const job = _demoJobs.find(j => j.id === id);
+    if (job) {
+      job.status = 'stopped';
+      job.completed_at = new Date().toISOString();
+      job.progress.stage = 'stopped';
+      job.progress.message = `Stopped by user. ${job.results_count} leads preserved.`;
+    }
+    return;
+  }
+
+  const response = await fetch(`${BACKEND_URL}/api/jobs/${id}/stop`, { method: 'POST' });
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ error: 'Unknown error' }));
+    throw new Error(err.error || `Failed to stop job: HTTP ${response.status}`);
+  }
+}
+
+export async function getJobResults(id: string): Promise<LeadRecord[]> {
+  if (_demoMode) {
+    return _demoLeads;
+  }
+
+  const response = await fetch(`${BACKEND_URL}/api/jobs/${id}/results`);
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ error: 'Unknown error' }));
+    throw new Error(err.error || `Failed to fetch results: HTTP ${response.status}`);
+  }
+  return response.json();
+}
+
+export async function getDashboardStats(): Promise<DashboardStats> {
+  if (_demoMode) {
+    const running = _demoJobs.filter(j => j.status === 'running').length;
+    const completed = _demoJobs.filter(j => ['completed', 'stopped', 'partial'].includes(j.status)).length;
+    const totalLeads = _demoJobs.reduce((sum, j) => sum + j.results_count, 0);
+    return { total_jobs: _demoJobs.length, running_jobs: running, completed_jobs: completed, total_leads: totalLeads };
+  }
+
+  const jobs = await getJobs();
+  return {
+    total_jobs: jobs.length,
+    running_jobs: jobs.filter(j => j.status === 'running').length,
+    completed_jobs: jobs.filter(j => ['completed', 'stopped', 'partial'].includes(j.status)).length,
+    total_leads: jobs.reduce((sum, j) => sum + j.results_count, 0),
+  };
+}
+
+export function getDownloadUrl(jobId: string, format: string): string {
+  if (_demoMode) return '#';
+  return `${BACKEND_URL}/api/jobs/${jobId}/download?format=${format}`;
+}
+
+// ============ DIAGNOSTICS ============
+export async function getDiagnostics(): Promise<any> {
+  if (_demoMode) return null;
+  try {
+    const response = await fetch(`${BACKEND_URL}/api/diagnostics`);
+    if (!response.ok) return null;
+    return response.json();
+  } catch {
+    return null;
+  }
+}
+
+// ============ DEMO MODE ============
+let _demoJobs: ScrapingJob[] = [];
+let _demoLeads: LeadRecord[] = [];
+
 const DEMO_LEADS: LeadRecord[] = [
   {
     business_name: "Civil Hospital Pusad",
@@ -151,7 +344,7 @@ const DEMO_LEADS: LeadRecord[] = [
     rating: "4.0",
     review_count: "67",
     business_status: "Open",
-    hours: "Mon-Sat: 8AM-10PM, Sun: 9AM-6PM",
+    hours: "Mon-Sat: 8AM-10PM",
     latitude: "19.8356",
     longitude: "77.6189",
     google_maps_url: "https://maps.google.com/?cid=12349",
@@ -202,63 +395,29 @@ const DEMO_LEADS: LeadRecord[] = [
   }
 ];
 
-export function isDemoMode(): boolean {
-  return demoMode;
+function extractCategory(query: string): string {
+  const patterns = [
+    /(.+?)\s+(?:in|near|around|mdhi|madhe|madhye|mein)\s+/i,
+    /^(.+?)\s+(?:in|near|around)\s+/i,
+  ];
+  for (const p of patterns) {
+    const m = query.match(p);
+    if (m) return m[1].trim();
+  }
+  return query.split(/\s+/).slice(0, 2).join(' ');
 }
 
-export function setDemoMode(value: boolean): void {
-  demoMode = value;
-}
-
-export async function checkHealth(): Promise<HealthStatus> {
-  try {
-    const response = await fetch(`${BACKEND_URL}/api/health`, {
-      method: 'GET',
-      signal: AbortSignal.timeout(3000),
-    });
-    if (response.ok) {
-      const data = await response.json();
-      demoMode = false;
-      return { ...data, demo_mode: false };
-    }
-    throw new Error('Health check failed');
-  } catch {
-    demoMode = true;
-    return {
-      ok: true,
-      status: 'demo',
-      version: '2.0.0-demo',
-      python: 'N/A',
-      scraper_ready: false,
-      playwright_importable: false,
-      output_directory_writable: false,
-      demo_mode: true,
-    };
+function extractLocation(query: string): string {
+  const patterns = [
+    /(?:in|near|around|mdhi|madhe|madhye|mein)\s+(.+)/i,
+  ];
+  for (const p of patterns) {
+    const m = query.match(p);
+    if (m) return m[1].trim();
   }
-}
-
-export async function createJob(params: {
-  query: string;
-  target: number;
-  enrichment: 'none' | 'website' | 'full';
-  format: 'csv' | 'xlsx' | 'json';
-}): Promise<ScrapingJob> {
-  if (demoMode) {
-    return createDemoJob(params);
-  }
-
-  const response = await fetch(`${BACKEND_URL}/api/jobs`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(params),
-  });
-
-  if (!response.ok) {
-    const err = await response.json().catch(() => ({ error: 'Unknown error' }));
-    throw new Error(err.error || 'Failed to create job');
-  }
-
-  return response.json();
+  const words = query.split(/\s+/);
+  if (words.length > 2) return words.slice(-2).join(' ');
+  return '';
 }
 
 function createDemoJob(params: {
@@ -286,41 +445,15 @@ function createDemoJob(params: {
       requested_target: params.target,
       percent: 0,
       current_query: params.query,
-      warnings: [],
-      message: 'Starting browser and initializing scraper...',
+      warnings: ['Demo mode — backend not connected'],
+      message: 'Demo mode: simulating scraping...',
     },
     results_count: 0,
   };
 
-  demoJobs.unshift(job);
+  _demoJobs.unshift(job);
   simulateDemoProgress(job, params);
   return job;
-}
-
-function extractCategory(query: string): string {
-  const patterns = [
-    /(.+?)\s+(?:in|near|around|mdhi|madhe|madhye)\s+/i,
-    /^(.+?)\s+(?:in|near|around)\s+/i,
-  ];
-  for (const p of patterns) {
-    const m = query.match(p);
-    if (m) return m[1].trim();
-  }
-  return query.split(/\s+/).slice(0, 2).join(' ');
-}
-
-function extractLocation(query: string): string {
-  const patterns = [
-    /(?:in|near|around|mdhi|madhe|madhye)\s+(.+)/i,
-    /(.+)\s+(?:mdhi|madhe|madhye)/i,
-  ];
-  for (const p of patterns) {
-    const m = query.match(p);
-    if (m) return m[1].trim();
-  }
-  const words = query.split(/\s+/);
-  if (words.length > 2) return words.slice(-2).join(' ');
-  return '';
 }
 
 function simulateDemoProgress(job: ScrapingJob, params: { query: string; target: number; enrichment: string }) {
@@ -353,7 +486,7 @@ function simulateDemoProgress(job: ScrapingJob, params: { query: string; target:
       job.progress.current_query = params.query;
       job.progress.percent = Math.round(((stages.length + i + 1) / (stages.length + target)) * 100);
       job.results_count = i + 1;
-      demoLeads = DEMO_LEADS.slice(0, i + 1);
+      _demoLeads = DEMO_LEADS.slice(0, i + 1);
     }, totalDelay);
   }
 
@@ -362,89 +495,9 @@ function simulateDemoProgress(job: ScrapingJob, params: { query: string; target:
     job.status = 'completed';
     job.completed_at = new Date().toISOString();
     job.progress.stage = 'completed';
-    job.progress.message = `Completed: ${target} leads collected`;
+    job.progress.message = `Completed: ${target} leads collected (demo)`;
     job.progress.percent = 100;
     job.results_count = target;
-    demoLeads = DEMO_LEADS.slice(0, target);
+    _demoLeads = DEMO_LEADS.slice(0, target);
   }, totalDelay);
-}
-
-export async function getJobs(): Promise<ScrapingJob[]> {
-  if (demoMode) {
-    return demoJobs;
-  }
-
-  const response = await fetch(`${BACKEND_URL}/api/jobs`);
-  if (!response.ok) throw new Error('Failed to fetch jobs');
-  return response.json();
-}
-
-export async function getJob(id: string): Promise<ScrapingJob> {
-  if (demoMode) {
-    const job = demoJobs.find(j => j.id === id);
-    if (!job) throw new Error('Job not found');
-    return job;
-  }
-
-  const response = await fetch(`${BACKEND_URL}/api/jobs/${id}`);
-  if (!response.ok) throw new Error('Failed to fetch job');
-  return response.json();
-}
-
-export async function stopJob(id: string): Promise<void> {
-  if (demoMode) {
-    const job = demoJobs.find(j => j.id === id);
-    if (job) {
-      job.status = 'stopped';
-      job.completed_at = new Date().toISOString();
-      job.progress.stage = 'stopped';
-      job.progress.message = `Stopped by user. ${job.results_count} leads preserved.`;
-    }
-    return;
-  }
-
-  const response = await fetch(`${BACKEND_URL}/api/jobs/${id}/stop`, { method: 'POST' });
-  if (!response.ok) throw new Error('Failed to stop job');
-}
-
-export async function getJobResults(id: string): Promise<LeadRecord[]> {
-  if (demoMode) {
-    return demoLeads;
-  }
-
-  const response = await fetch(`${BACKEND_URL}/api/jobs/${id}/results`);
-  if (!response.ok) throw new Error('Failed to fetch results');
-  return response.json();
-}
-
-export async function getDashboardStats(): Promise<DashboardStats> {
-  if (demoMode) {
-    const running = demoJobs.filter(j => j.status === 'running').length;
-    const completed = demoJobs.filter(j => j.status === 'completed' || j.status === 'stopped').length;
-    const totalLeads = demoJobs.reduce((sum, j) => sum + j.results_count, 0);
-    return {
-      total_jobs: demoJobs.length,
-      running_jobs: running,
-      completed_jobs: completed,
-      total_leads: totalLeads,
-    };
-  }
-
-  const jobs = await getJobs();
-  const running = jobs.filter(j => j.status === 'running').length;
-  const completed = jobs.filter(j => j.status === 'completed' || j.status === 'stopped' || j.status === 'partial').length;
-  const totalLeads = jobs.reduce((sum, j) => sum + j.results_count, 0);
-  return {
-    total_jobs: jobs.length,
-    running_jobs: running,
-    completed_jobs: completed,
-    total_leads: totalLeads,
-  };
-}
-
-export function getDownloadUrl(jobId: string, format: string): string {
-  if (demoMode) {
-    return '#';
-  }
-  return `${BACKEND_URL}/api/jobs/${jobId}/download?format=${format}`;
 }
