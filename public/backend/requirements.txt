@@ -1,0 +1,12 @@
+# ITCYBER Lead Scraper - Backend Requirements
+# =============================================
+
+# Web framework
+flask>=3.0.0
+flask-cors>=4.0.0
+
+# Browser automation
+playwright>=1.40.0
+
+# Excel output
+openpyxl>=3.1.0
