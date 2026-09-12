@@ -48,10 +48,10 @@ app = Flask(__name__)
 # CORS configuration
 ALLOWED_ORIGINS = os.environ.get(
     'ITCYBER_ALLOWED_ORIGINS',
-    'http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000'
+    'http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000,https://itcyber.vercel.app'
 ).split(',')
 
-CORS(app, origins=ALLOWED_ORIGINS, supports_credentials=True)
+CORS(app, origins=ALLOWED_ORIGINS, supports_credentials=True, methods=['GET', 'POST', 'OPTIONS'])
 
 # Configuration
 BASE_DIR = Path(__file__).parent
@@ -515,8 +515,8 @@ def diagnostics():
 
 def main():
     parser = argparse.ArgumentParser(description='ITCYBER Dashboard API Server')
-    parser.add_argument('--host', default='127.0.0.1', help='Host to bind to')
-    parser.add_argument('--port', type=int, default=8766, help='Port to listen on')
+    parser.add_argument('--host', default=os.environ.get('HOST', '127.0.0.1'), help='Host to bind to')
+    parser.add_argument('--port', type=int, default=int(os.environ.get('PORT', 8766)), help='Port to listen on')
     parser.add_argument('--no-open', action='store_true', help='Do not open browser')
     parser.add_argument('--debug', action='store_true', help='Enable debug mode')
     args = parser.parse_args()
