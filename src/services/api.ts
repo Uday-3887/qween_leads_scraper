@@ -66,7 +66,21 @@ export async function checkHealth(): Promise<HealthStatus> {
       const wasDemo = _demoMode;
       _demoMode = false;
       if (wasDemo && _onConnectionChange) _onConnectionChange(true);
-      return { ...data, demo_mode: false };
+      
+      // Map backend response to our HealthStatus format
+      return {
+        ok: data.ok !== undefined ? data.ok : true,
+        status: data.status || 'online',
+        version: data.version || 'N/A',
+        python: data.python || 'N/A',
+        scraper_ready: data.scraper_ready || false,
+        playwright_importable: data.scraper_ready || false,
+        output_directory_writable: true,
+        demo_mode: false,
+        cloud_ready: data.cloud_ready,
+        auth_required: data.auth_required,
+        setup_required: data.setup_required,
+      };
     }
     throw new Error(`HTTP ${response.status}`);
   } catch (err: any) {

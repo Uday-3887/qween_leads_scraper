@@ -71,6 +71,10 @@ export interface HealthStatus {
   output_directory_writable: boolean;
   demo_mode?: boolean;
   connection_error?: string;
+  cloud_ready?: boolean;
+  auth_required?: boolean;
+  setup_required?: boolean;
+  allowed_origins?: string[];
 }
 
 export interface DashboardStats {
