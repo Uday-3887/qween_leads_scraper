@@ -9,6 +9,8 @@ import {
   getDownloadUrl,
   isDemoMode,
   getBackendUrl,
+  setBackendUrl,
+  resetBackendUrl,
   startHealthPolling,
   stopHealthPolling,
 } from './services/api';
@@ -733,12 +735,30 @@ function generateLogs(jobs: ScrapingJob[], isLive: boolean) {
 // ============ SETUP PAGE ============
 function SetupPage({ health, isLive, onRefresh }: { health: HealthStatus | null; isLive: boolean; onRefresh: () => void }) {
   const [copied, setCopied] = useState<string | null>(null);
+  const [backendUrlInput, setBackendUrlInput] = useState(getBackendUrl());
+  const [urlSaved, setUrlSaved] = useState(false);
 
   const copyToClipboard = (text: string, id: string) => {
     navigator.clipboard.writeText(text).then(() => {
       setCopied(id);
       setTimeout(() => setCopied(null), 2000);
     });
+  };
+
+  const handleSaveUrl = () => {
+    const url = backendUrlInput.trim().replace(/\/$/, '');
+    if (url.startsWith('http')) {
+      setBackendUrl(url);
+      setUrlSaved(true);
+      setTimeout(() => setUrlSaved(false), 2000);
+      onRefresh();
+    }
+  };
+
+  const handleResetUrl = () => {
+    resetBackendUrl();
+    setBackendUrlInput('http://127.0.0.1:8766');
+    onRefresh();
   };
 
   const backendFiles = [
@@ -785,6 +805,85 @@ function SetupPage({ health, isLive, onRefresh }: { health: HealthStatus | null;
             <p className="text-gray-400 text-xs">Expected endpoint: <code className="bg-gray-800 px-1.5 py-0.5 rounded">http://127.0.0.1:8766/api/health</code></p>
           </div>
         )}
+      </div>
+
+      {/* Backend URL Configuration */}
+      <div className="bg-gray-800 rounded-xl border border-gray-700 p-6 space-y-4">
+        <h3 className="text-lg font-semibold text-white">🔗 Backend URL Configuration</h3>
+        <p className="text-sm text-gray-400">Configure the backend API endpoint. Change this if your backend is running on a different host or port.</p>
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={backendUrlInput}
+            onChange={(e) => setBackendUrlInput(e.target.value)}
+            placeholder="http://127.0.0.1:8766"
+            className="flex-1 px-4 py-2 bg-gray-900 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm"
+          />
+          <button
+            onClick={handleSaveUrl}
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors"
+          >
+            {urlSaved ? '✓ Saved' : 'Save'}
+          </button>
+          <button
+            onClick={handleResetUrl}
+            className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded-lg text-sm font-medium transition-colors"
+          >
+            Reset
+          </button>
+        </div>
+        <div className="text-xs text-gray-500 space-y-1">
+          <p>• Current: <code className="text-blue-400">{getBackendUrl()}</code></p>
+          <p>• Default: <code className="text-gray-400">http://127.0.0.1:8766</code></p>
+          <p>• For deployed backend: <code className="text-gray-400">https://your-backend.railway.app</code></p>
+          <p>• URL is saved in browser localStorage</p>
+        </div>
+      </div>
+
+      {/* Deployment Options */}
+      <div className="bg-gray-800 rounded-xl border border-gray-700 p-6 space-y-4">
+        <h3 className="text-lg font-semibold text-white">🚀 Deployment Options</h3>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="bg-gray-900 rounded-lg p-4 border border-gray-700">
+            <p className="text-blue-400 font-medium text-sm mb-2">Local Development</p>
+            <p className="text-xs text-gray-400 mb-2">Run both frontend and backend locally</p>
+            <CodeBlock id="deploy-local" code={`# Terminal 1: Backend
+cd backend
+python dashboard_server.py
+
+# Terminal 2: Frontend
+npm run dev`} copied={copied} onCopy={copyToClipboard} />
+          </div>
+          <div className="bg-gray-900 rounded-lg p-4 border border-gray-700">
+            <p className="text-green-400 font-medium text-sm mb-2">Docker (Full Stack)</p>
+            <p className="text-xs text-gray-400 mb-2">Containerized deployment</p>
+            <CodeBlock id="deploy-docker" code={`# Build and run
+docker-compose up --build
+
+# Or run separately
+docker build -t itcyber-backend ./backend
+docker run -p 8766:8766 itcyber-backend`} copied={copied} onCopy={copyToClipboard} />
+          </div>
+          <div className="bg-gray-900 rounded-lg p-4 border border-gray-700">
+            <p className="text-purple-400 font-medium text-sm mb-2">Cloud (Vercel + Railway)</p>
+            <p className="text-xs text-gray-400 mb-2">Deploy frontend and backend separately</p>
+            <CodeBlock id="deploy-cloud" code={`# Frontend: Vercel
+vercel deploy
+
+# Backend: Railway/Render
+# Push backend/ folder to Git
+# Connect repo to Railway/Render`} copied={copied} onCopy={copyToClipboard} />
+          </div>
+        </div>
+        <div className="text-xs text-gray-400 mt-4 space-y-1">
+          <p>📄 <strong>Deployment configs included:</strong></p>
+          <ul className="list-disc list-inside ml-2 space-y-0.5">
+            <li><code className="text-blue-400">vercel.json</code> — Frontend deployment to Vercel</li>
+            <li><code className="text-blue-400">Dockerfile</code> — Backend containerization</li>
+            <li><code className="text-blue-400">docker-compose.yml</code> — Full-stack local deployment</li>
+            <li><code className="text-blue-400">Procfile</code> — PaaS deployment (Heroku/Render)</li>
+          </ul>
+        </div>
       </div>
 
       {/* Setup Steps */}
