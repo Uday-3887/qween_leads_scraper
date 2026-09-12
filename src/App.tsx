@@ -13,6 +13,7 @@ import {
   resetBackendUrl,
   startHealthPolling,
   stopHealthPolling,
+  downloadBackendZip,
 } from './services/api';
 
 // ============ ICONS ============
@@ -223,9 +224,10 @@ export default function App() {
           {!isLive && (
             <button
               onClick={() => setCurrentPage('setup')}
-              className="w-full mt-2 px-3 py-1.5 bg-amber-600/20 border border-amber-600/40 text-amber-400 text-xs rounded-lg hover:bg-amber-600/30 transition-colors"
+              className="w-full mt-2 px-3 py-2 bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 text-white text-xs rounded-lg font-medium transition-all shadow-md shadow-amber-600/20 flex items-center justify-center gap-1.5"
             >
-              Setup Backend →
+              <Icon.Download />
+              Get Backend
             </button>
           )}
         </div>
@@ -233,25 +235,39 @@ export default function App() {
 
       {/* Main Content */}
       <main className="flex-1 overflow-auto">
-        {/* Connection Banner */}
-        {!isLive && connectionStatus !== 'checking' && (
-          <div className="bg-gradient-to-r from-amber-900/40 to-orange-900/40 border-b border-amber-700/40 px-6 py-3 flex items-center justify-between">
+      {/* Connection Banner */}
+      {!isLive && connectionStatus !== 'checking' && (
+        <div className="bg-gradient-to-r from-amber-900/40 to-orange-900/40 border-b border-amber-700/40 px-6 py-4">
+          <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <Icon.Warning />
+              <div className="w-10 h-10 rounded-full bg-amber-600/20 flex items-center justify-center">
+                <Icon.Warning />
+              </div>
               <div>
-                <p className="text-sm font-medium text-amber-200">Backend Not Connected</p>
-                <p className="text-xs text-amber-400/80">Start the Python backend for live Google Maps scraping. Currently in demo mode.</p>
+                <p className="text-sm font-medium text-amber-200">Demo Mode Active</p>
+                <p className="text-xs text-amber-400/80 mt-0.5">
+                  You're viewing demo data. Download the backend to enable live Google Maps scraping.
+                </p>
               </div>
             </div>
-            <button
-              onClick={() => setCurrentPage('setup')}
-              className="px-4 py-1.5 bg-amber-600 hover:bg-amber-500 text-white text-sm rounded-lg font-medium transition-colors"
-            >
-              Setup Guide
-            </button>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setCurrentPage('setup')}
+                className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white text-sm rounded-lg font-medium transition-colors flex items-center gap-2"
+              >
+                <Icon.Download />
+                Get Backend
+              </button>
+              <button
+                onClick={() => setCurrentPage('scrape')}
+                className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-gray-200 text-sm rounded-lg font-medium transition-colors"
+              >
+                Try Demo
+              </button>
+            </div>
           </div>
-        )}
-
+        </div>
+      )}
         {isLive && (
           <div className="bg-gradient-to-r from-green-900/30 to-emerald-900/30 border-b border-green-700/30 px-6 py-2 flex items-center gap-3">
             <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
@@ -274,7 +290,7 @@ export default function App() {
           <LogsPage jobs={jobs} isLive={isLive} />
         )}
         {currentPage === 'setup' && (
-          <SetupPage health={health} isLive={isLive} onRefresh={async () => { const h = await checkHealth(); setHealth(h); setConnectionStatus(h.demo_mode ? 'disconnected' : 'connected'); }} />
+          <SetupPage health={health} isLive={isLive} notify={notify} onRefresh={async () => { const h = await checkHealth(); setHealth(h); setConnectionStatus(h.demo_mode ? 'disconnected' : 'connected'); }} />
         )}
         {currentPage === 'settings' && (
           <SettingsPage health={health} isLive={isLive} />
@@ -733,7 +749,7 @@ function generateLogs(jobs: ScrapingJob[], isLive: boolean) {
 }
 
 // ============ SETUP PAGE ============
-function SetupPage({ health, isLive, onRefresh }: { health: HealthStatus | null; isLive: boolean; onRefresh: () => void }) {
+function SetupPage({ health, isLive, onRefresh, notify }: { health: HealthStatus | null; isLive: boolean; onRefresh: () => void; notify: (type: 'success' | 'error' | 'warning' | 'info', message: string) => void }) {
   const [copied, setCopied] = useState<string | null>(null);
   const [backendUrlInput, setBackendUrlInput] = useState(getBackendUrl());
   const [urlSaved, setUrlSaved] = useState(false);
@@ -890,19 +906,43 @@ vercel deploy
       <div className="bg-gray-800 rounded-xl border border-gray-700 p-6 space-y-6">
         <h3 className="text-lg font-semibold text-white">📋 Setup Steps (Windows PowerShell)</h3>
 
-        <Step number={1} title="Download Backend Files" description="Copy all backend files to a local folder.">
-          <div className="space-y-2">
-            {backendFiles.map(file => (
-              <div key={file.name} className="flex items-center justify-between bg-gray-900 rounded-lg px-3 py-2">
-                <div>
-                  <span className="text-white text-sm font-medium">{file.name}</span>
-                  <span className="text-gray-500 text-xs ml-2">— {file.desc}</span>
-                </div>
-                <a href={file.path} download className="px-2 py-1 bg-blue-600/20 text-blue-400 text-xs rounded hover:bg-blue-600/30">
-                  <Icon.Download />
-                </a>
+        <Step number={1} title="Download Backend Files" description="Get all backend files as a ZIP package.">
+          <div className="space-y-3">
+            <button
+              onClick={async () => {
+                try {
+                  await downloadBackendZip();
+                  notify('success', 'Backend files downloaded! Extract and follow START_HERE.txt');
+                } catch (err) {
+                  notify('error', 'Failed to download backend files');
+                }
+              }}
+              className="w-full flex items-center justify-center gap-2 px-6 py-4 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white rounded-lg font-medium transition-all shadow-lg shadow-blue-600/20"
+            >
+              <Icon.Download />
+              Download Complete Backend (ZIP)
+            </button>
+            <p className="text-xs text-gray-400 text-center">
+              Includes all Python files, Dockerfile, requirements.txt, and quick start guide
+            </p>
+            <details className="text-sm">
+              <summary className="cursor-pointer text-gray-400 hover:text-gray-300">
+                Or download individual files:
+              </summary>
+              <div className="space-y-2 mt-2">
+                {backendFiles.map(file => (
+                  <div key={file.name} className="flex items-center justify-between bg-gray-900 rounded-lg px-3 py-2">
+                    <div>
+                      <span className="text-white text-sm font-medium">{file.name}</span>
+                      <span className="text-gray-500 text-xs ml-2">— {file.desc}</span>
+                    </div>
+                    <a href={file.path} download className="px-2 py-1 bg-blue-600/20 text-blue-400 text-xs rounded hover:bg-blue-600/30">
+                      <Icon.Download />
+                    </a>
+                  </div>
+                ))}
               </div>
-            ))}
+            </details>
           </div>
         </Step>
 

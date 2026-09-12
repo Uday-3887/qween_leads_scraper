@@ -213,6 +213,73 @@ export async function getDiagnostics(): Promise<any> {
   } catch { return null; }
 }
 
+// ============ BACKEND FILES ZIP DOWNLOAD ============
+export async function downloadBackendZip(): Promise<void> {
+  const JSZip = (await import('jszip')).default;
+  const { saveAs } = await import('file-saver');
+
+  const zip = new JSZip();
+  const backendFolder = zip.folder('itcyber-backend');
+  if (!backendFolder) throw new Error('Failed to create zip folder');
+
+  const files = [
+    'dashboard_server.py',
+    'connected_scraper.py',
+    'universal_query.py',
+    'location_planner.py',
+    'contact_utils.py',
+    'requirements.txt',
+    'tests.py',
+    'Dockerfile',
+    'Procfile',
+    'README.md',
+  ];
+
+  for (const filename of files) {
+    try {
+      const response = await fetch(`/backend/${filename}`);
+      if (response.ok) {
+        const content = await response.text();
+        backendFolder.file(filename, content);
+      }
+    } catch (err) {
+      console.warn(`Could not fetch ${filename}:`, err);
+    }
+  }
+
+  // Add a quick start script
+  const startScript = `# ITCYBER Backend Quick Start
+# ==========================
+
+# 1. Create virtual environment
+python -m venv .venv
+
+# 2. Activate it
+# Windows PowerShell:
+.\\.venv\\Scripts\\Activate.ps1
+# Windows CMD:
+.venv\\Scripts\\activate.bat
+# Linux/Mac:
+source .venv/bin/activate
+
+# 3. Install dependencies
+pip install -r requirements.txt
+
+# 4. Install Playwright browser
+python -m playwright install chromium
+
+# 5. Start the server
+python dashboard_server.py --host 127.0.0.1 --port 8766 --no-open
+
+# 6. Open dashboard
+# http://127.0.0.1:5173
+`;
+  backendFolder.file('START_HERE.txt', startScript);
+
+  const blob = await zip.generateAsync({ type: 'blob' });
+  saveAs(blob, 'itcyber-backend.zip');
+}
+
 // ============ DEMO MODE DATA ============
 let _demoJobs: ScrapingJob[] = [];
 let _demoLeads: LeadRecord[] = [];
